@@ -1,0 +1,51 @@
+# env
+.env
+.env.*
+!.env.example
+
+# deps
+node_modules/
+bun.lockb
+package-lock.json
+pnpm-lock.yaml
+yarn.lock
+
+# build
+dist/
+build/
+.next/
+out/
+*.tsbuildinfo
+
+# os
+.DS_Store
+Thumbs.db
+
+# editor
+.vscode/
+.idea/
+*.swp
+
+# logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# caches
+.cache/
+.parcel-cache/
+.turbo/
+coverage/
+__pycache__/
+.venv/
+
+# composio submission artifacts
+agent-sessions/
+.session-collector-bin/
+submission.zip
+project.zip
+
+# generated data
+data/raw/
+*.local.json

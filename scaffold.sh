@@ -8,7 +8,8 @@ if [ -z "$COMPOSIO_API_KEY" ]; then
 fi
 
 echo "Fetching OpenRouter API key..."
-OPENROUTER_RESPONSE=$(curl -s -X POST "https://product-eng.hiring.composio.io/api/openrouter-key")
+OPENROUTER_RESPONSE=$(curl -s -X POST "https://product-eng.hiring.composio.io/api/openrouter-key" \
+	-H "x-composio-api-key: $COMPOSIO_API_KEY")
 
 if command -v jq >/dev/null 2>&1; then
 	OPENROUTER_API_KEY=$(echo "$OPENROUTER_RESPONSE" | jq -r '.apiKey')
