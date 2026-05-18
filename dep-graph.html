@@ -112,6 +112,20 @@
           <label class="check"><input type="checkbox" data-edge="mentioned" checked /><span class="swatch mn"></span>explicit mention in docs</label>
         </section>
         <section>
+          <h2>Edge quality</h2>
+          <label class="check"><input type="checkbox" data-subtype="resolver" checked /><span class="swatch pc"></span>resolver (real prerequisite)</label>
+          <label class="check"><input type="checkbox" data-subtype="passthrough" /><span class="swatch" style="background:#666"></span>passthrough (noisy)</label>
+          <label class="check"><input type="checkbox" data-subtype="mentioned" checked /><span class="swatch mn"></span>mentioned-only</label>
+          <div style="margin-top:10px;font-size:11px;color:var(--muted);line-height:1.45">
+            <strong style="color:var(--text)">passthrough</strong> = tool's output contains entity X but it also <em>requires</em> X to run — can't help discover X from scratch. Hidden by default.
+          </div>
+        </section>
+        <section>
+          <h2>Confidence floor</h2>
+          <input type="range" id="conf" min="0" max="100" value="85" style="width:100%" />
+          <div style="display:flex;justify-content:space-between;color:var(--muted);font-size:11px"><span>0</span><span id="conf-val">0.85</span><span>1</span></div>
+        </section>
+        <section>
           <h2>Legend</h2>
           <div class="legend">
             <div class="leg"><span class="swatch gs"></span>Google Super tool</div>
@@ -159,7 +173,16 @@
         activeTool: null,
         mode: "entity",
         edgeTypes: new Set(["producer_consumer", "lookup", "mentioned"]),
+        subtypes: new Set(["resolver", "mentioned"]),
+        confidence: 0.85,
       };
+
+      function passesFilters(e) {
+        if (!state.edgeTypes.has(e.type)) return false;
+        if (!state.subtypes.has(e.subtype)) return false;
+        if ((e.confidence ?? 0) < state.confidence) return false;
+        return true;
+      }
 
       async function load() {
         // Prefer inlined data (works on file://). Falls back to fetch when the
@@ -234,7 +257,7 @@
 
       function buildSubgraphForEntity(entity) {
         const edges = state.graph.edges.filter(
-          (e) => e.entity === entity && state.edgeTypes.has(e.type),
+          (e) => e.entity === entity && passesFilters(e),
         );
         const slugs = new Set();
         for (const e of edges) {
@@ -245,20 +268,17 @@
         return { nodes, edges, entity };
       }
 
-      function buildSubgraphForTool(slug, depth = 1) {
+      function buildSubgraphForTool(slug) {
         // 1-hop neighborhood: upstream + downstream of `slug`
         const slugs = new Set([slug]);
         for (const e of state.graph.edges) {
-          if (!state.edgeTypes.has(e.type)) continue;
+          if (!passesFilters(e)) continue;
           if (e.target === slug) slugs.add(e.source);
           if (e.source === slug) slugs.add(e.target);
         }
         const nodes = state.graph.nodes.filter((n) => slugs.has(n.id));
         const edges = state.graph.edges.filter(
-          (e) =>
-            state.edgeTypes.has(e.type) &&
-            slugs.has(e.source) &&
-            slugs.has(e.target),
+          (e) => passesFilters(e) && slugs.has(e.source) && slugs.has(e.target),
         );
         return { nodes, edges };
       }
@@ -509,17 +529,67 @@
               .join(" ")
           : `<p class="empty">No produced entities.</p>`;
 
+        // Execution plan — what the agent should actually DO to call this tool
+        const planHtml = buildExecutionPlan(n, incoming);
+
         document.getElementById("detail").innerHTML = `
           <h2>${shortLabel(id)} <span class="badge ${n.toolkit === "github" ? "gh" : "gs"}">${n.toolkit}</span></h2>
           <p style="color:var(--muted)">${n.name || ""}</p>
           <p style="font-size:12px; color:var(--muted)">${(n.description || "").slice(0, 320)}${(n.description || "").length > 320 ? "…" : ""}</p>
 
+          <section><h2>Execution plan</h2>${planHtml}</section>
           <section><h2>Prerequisites (upstream)</h2>${inHtml}</section>
-          <section><h2>Produces</h2><div style="display:flex;flex-wrap:wrap;gap:4px">${produceHtml}</div></section>
           <section><h2>Needs from user</h2>${reqHtml}</section>
+          <section><h2>Produces</h2><div style="display:flex;flex-wrap:wrap;gap:4px">${produceHtml}</div></section>
           <section><h2>Consumers (downstream)</h2>${outHtml}</section>
         `;
         wireGoto();
+      }
+
+      /**
+       * Builds an agent-friendly "execution plan" for a tool: which entities to
+       * resolve first (via which upstream tool), what to ask the user for, and
+       * then the final call. This is the agent-planning view of the dep graph.
+       */
+      function buildExecutionPlan(node, incoming) {
+        // Group resolver edges by entity, keep top-1 per entity by confidence.
+        const byEntity = new Map();
+        for (const e of incoming) {
+          if (e.subtype !== "resolver") continue;
+          const cur = byEntity.get(e.entity);
+          if (!cur || e.confidence > cur.confidence) byEntity.set(e.entity, e);
+        }
+
+        const slugLink = (s) =>
+          `<a class="slug" data-goto="${s}">${shortLabel(s)}</a>`;
+
+        const userParams = (node.requiresUserInput || []).map((r) => r.param);
+        const resolveSteps = [...byEntity.entries()].sort((a, b) => b[1].confidence - a[1].confidence);
+
+        if (resolveSteps.length === 0 && userParams.length === 0) {
+          return `<p class="empty">This tool needs no prerequisites — call it directly.</p>`;
+        }
+
+        const steps = [];
+        let i = 1;
+        for (const [entity, edge] of resolveSteps) {
+          const typeLabel = edge.type === "lookup" ? "look up" : "resolve";
+          steps.push(
+            `<div class="row" style="display:flex;gap:10px;align-items:flex-start"><span style="color:var(--accent);font-weight:600;flex-shrink:0;min-width:18px">${i}.</span><div><strong>${typeLabel} <code>${entity}</code></strong><div class="meta">call ${slugLink(edge.node || edge.source)} (conf ${edge.confidence.toFixed(2)})</div></div></div>`,
+          );
+          i++;
+        }
+        if (userParams.length > 0) {
+          steps.push(
+            `<div class="row" style="display:flex;gap:10px;align-items:flex-start"><span style="color:var(--accent);font-weight:600;flex-shrink:0;min-width:18px">${i}.</span><div><strong>gather from user</strong><div class="meta">${userParams.map((p) => `<code>${p}</code>`).join(", ")}</div></div></div>`,
+          );
+          i++;
+        }
+        steps.push(
+          `<div class="row" style="display:flex;gap:10px;align-items:flex-start"><span style="color:var(--accent);font-weight:600;flex-shrink:0;min-width:18px">${i}.</span><div><strong>call <code>${shortLabel(node.id)}</code></strong><div class="meta">all inputs satisfied</div></div></div>`,
+        );
+
+        return steps.join("");
       }
 
       function wireGoto() {
@@ -575,19 +645,36 @@
           });
         });
 
+        const refresh = () => {
+          if (state.activeEntity) focusEntity(state.activeEntity);
+          else if (state.activeTool) focusTool(state.activeTool);
+        };
+
         document.querySelectorAll('[data-edge]').forEach((cb) => {
           cb.addEventListener("change", (e) => {
             const t = e.target.dataset.edge;
             if (e.target.checked) state.edgeTypes.add(t);
             else state.edgeTypes.delete(t);
-            // refresh active view
-            if (state.activeEntity) focusEntity(state.activeEntity);
-            else if (state.activeTool) focusTool(state.activeTool);
+            refresh();
           });
         });
+        document.querySelectorAll('[data-subtype]').forEach((cb) => {
+          cb.addEventListener("change", (e) => {
+            const t = e.target.dataset.subtype;
+            if (e.target.checked) state.subtypes.add(t);
+            else state.subtypes.delete(t);
+            refresh();
+          });
+        });
+        document.getElementById("conf").addEventListener("input", (e) => {
+          state.confidence = e.target.value / 100;
+          document.getElementById("conf-val").textContent = state.confidence.toFixed(2);
+          refresh();
+        });
 
-        // Auto-open a sensible starter entity so the page isn't blank
-        focusEntity("thread_id");
+        // Auto-open the canonical example from the brief so the page demonstrates
+        // a clean dependency plan immediately.
+        focusTool("GITHUB_CREATE_AN_ISSUE_COMMENT");
       }
 
       init().catch((e) => {
