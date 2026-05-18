@@ -130,7 +130,7 @@ async function callLLM(client: Anthropic, tool: RawTool, attempt = 0): Promise<E
   try {
     const resp = await client.messages.create({
       model: MODEL,
-      max_tokens: 2000,
+      max_tokens: 4000,
       system: SYSTEM_PROMPT,
       messages: [{ role: "user", content: buildUserPrompt(tool) }],
     });
