@@ -75,6 +75,15 @@ type Edge = {
   entity: string;
   param: string;
   type: "producer_consumer" | "lookup" | "mentioned";
+  /**
+   * resolver: source DISCOVERS the entity from scratch — can actually help the
+   *           agent answer "where does this id come from?" Useful in the graph.
+   * passthrough: source's output contains the entity, but source REQUIRES that
+   *              entity as input too. So calling source can't help you obtain
+   *              the entity if you don't already have it. Noisy — hidden by default.
+   * mentioned: came purely from explicit slug mention in description text.
+   */
+  subtype: "resolver" | "passthrough" | "mentioned";
   required: boolean;
   confidence: number;
   rationale: string;
@@ -125,7 +134,46 @@ const UBIQUITOUS_ENTITIES = new Set([
 
 // Max producers we'll link per (consumer, entity, param) tuple — keeps the
 // graph readable. Confidence ranking decides which producers survive.
-const MAX_PRODUCERS_PER_CONSUMER_ENTITY = 5;
+const MAX_PRODUCERS_PER_CONSUMER_ENTITY = 6;
+
+/**
+ * Stems we use to detect "the producer slug is semantically about this entity".
+ * If `LIST_COMMITS` produces `sha`, we want it to outrank `LIST_BRANCHES` —
+ * they both produce `sha`, but the slug `COMMIT` actually means commit.
+ */
+const ENTITY_STEMS: Record<string, string[]> = {
+  sha: ["commit"],
+  thread_id: ["thread"],
+  message_id: ["message", "email"],
+  draft_id: ["draft"],
+  label_id: ["label"],
+  event_id: ["event"],
+  calendar_id: ["calendar"],
+  file_id: ["file"],
+  folder_id: ["folder"],
+  spreadsheet_id: ["spreadsheet"],
+  sheet_id: ["sheet"],
+  document_id: ["document", "doc"],
+  issue_number: ["issue"],
+  pull_number: ["pull_request", "pull", "pr"],
+  comment_id: ["comment"],
+  release_id: ["release"],
+  workflow_id: ["workflow"],
+  run_id: ["run"],
+  branch: ["branch"],
+  ref: ["ref", "branch", "commit"],
+  gist_id: ["gist"],
+  team_slug: ["team"],
+  user_login: ["user"],
+  contact_email: ["contact", "people"],
+};
+
+function nameMatchesEntity(slug: string, entity: string): boolean {
+  const stems = ENTITY_STEMS[entity];
+  if (!stems) return false;
+  const s = slug.toLowerCase();
+  return stems.some((stem) => s.includes(stem));
+}
 
 // Normalize entity names — strip toolkit prefixes, collapse synonyms.
 function normalizeEntity(raw: string): string {
@@ -257,6 +305,28 @@ function main() {
       }
     }
 
+    // 2b. Build a "requires entity" index: slug → Set of entities this tool needs
+    // as a producer_ref / lookup_required input. Used to distinguish resolvers
+    // from passthrough tools — a tool that REQUIRES X as input cannot discover X.
+    // Optional inputs (e.g. an optional sha filter on LIST_COMMITS) don't count —
+    // the tool can still be called without them and yield the entity from scratch.
+    const requiresByTool = new Map<string, Set<string>>();
+    for (const tool of rawTools) {
+      const ex = extractions.get(tool.slug);
+      if (!ex) continue;
+      const reqs = new Set<string>();
+      for (const c of ex.consumes) {
+        if (
+          c.required &&
+          (c.classification === "producer_ref" || c.classification === "lookup_required") &&
+          c.entity
+        ) {
+          reqs.add(normalizeEntity(c.entity));
+        }
+      }
+      requiresByTool.set(tool.slug, reqs);
+    }
+
     // 3. Resolve edges
     const edges: Edge[] = [];
     const seenEdges = new Set<string>(); // dedupe (source, target, entity, param)
@@ -290,6 +360,7 @@ function main() {
               entity: c.entity ? normalizeEntity(c.entity) : "(mentioned)",
               param: c.param,
               type: "mentioned",
+              subtype: "mentioned",
               required: c.required,
               confidence: 1.0,
               rationale: `description explicitly names ${producer}`,
@@ -310,15 +381,19 @@ function main() {
           const producers = producersByEntity.get(norm);
           if (!producers) continue;
 
-          // Score every candidate producer, then keep top-K.
-          const scored: { slug: string; confidence: number }[] = [];
+          // Score every candidate producer, classify resolver vs passthrough,
+          // then keep top-K resolvers.
+          const scored: { slug: string; confidence: number; subtype: "resolver" | "passthrough" }[] = [];
           for (const producerSlug of producers) {
             if (producerSlug === consumer) continue;
             const producer = nodeBySlug.get(producerSlug);
             if (!producer) continue;
 
-            let confidence = 0.55;
-            if (producer.toolkit === consumerToolkit) confidence += 0.2;
+            const producerNeedsEntity = requiresByTool.get(producerSlug)?.has(norm) === true;
+            const subtype: "resolver" | "passthrough" = producerNeedsEntity ? "passthrough" : "resolver";
+
+            let confidence = 0.5;
+            if (producer.toolkit === consumerToolkit) confidence += 0.15;
             // for producer_ref, list/get/search are the natural producers
             if (c.classification === "producer_ref") {
               if (producer.category === "list") confidence += 0.15;
@@ -332,19 +407,33 @@ function main() {
               if (producer.category === "list") confidence += 0.2;
               else confidence -= 0.3;
             }
-            scored.push({ slug: producerSlug, confidence: Math.max(0, Math.min(1, confidence)) });
+            // semantic name match — strongest signal that this producer is THE
+            // one for this entity (LIST_COMMITS for sha, LIST_THREADS for thread_id…)
+            if (nameMatchesEntity(producerSlug, norm)) confidence += 0.2;
+            // passthrough tools can't help an agent discover the entity from scratch
+            if (subtype === "passthrough") confidence -= 0.35;
+            scored.push({
+              slug: producerSlug,
+              confidence: Math.max(0, Math.min(1, confidence)),
+              subtype,
+            });
           }
 
-          scored.sort((a, b) => b.confidence - a.confidence);
+          // Prefer resolvers — they're what an agent actually needs.
+          scored.sort((a, b) => {
+            if (a.subtype !== b.subtype) return a.subtype === "resolver" ? -1 : 1;
+            return b.confidence - a.confidence;
+          });
           const top = scored.slice(0, MAX_PRODUCERS_PER_CONSUMER_ENTITY);
 
-          for (const { slug: producerSlug, confidence } of top) {
+          for (const { slug: producerSlug, confidence, subtype } of top) {
             addEdge({
               source: producerSlug,
               target: consumer,
               entity: norm,
               param: c.param,
               type: c.classification === "lookup_required" ? "lookup" : "producer_consumer",
+              subtype,
               required: c.required,
               confidence,
               rationale: c.rationale,
@@ -365,6 +454,10 @@ function main() {
       }, {}),
       byEdgeType: edges.reduce<Record<string, number>>((acc, e) => {
         acc[e.type] = (acc[e.type] || 0) + 1;
+        return acc;
+      }, {}),
+      bySubtype: edges.reduce<Record<string, number>>((acc, e) => {
+        acc[e.subtype] = (acc[e.subtype] || 0) + 1;
         return acc;
       }, {}),
       topEntities: [...producersByEntity.entries()]

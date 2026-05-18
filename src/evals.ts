@@ -147,8 +147,12 @@ async function main() {
   // Index incoming edges per consumer
   const incoming = new Map<string, Graph["edges"]>();
   for (const e of graph.edges) {
-    if (!incoming.has(e.target)) incoming.set(e.target, []);
-    incoming.get(e.target)!.push(e);
+    let arr = incoming.get(e.target);
+    if (!arr) {
+      arr = [];
+      incoming.set(e.target, arr);
+    }
+    arr.push(e);
   }
 
   let hits = 0;
@@ -164,7 +168,11 @@ async function main() {
       continue;
     }
     const upstream = new Set((incoming.get(gt.consumer) || []).map((e) => e.source));
-    const consumer = graph.nodes.find((n) => n.id === gt.consumer)!;
+    const consumer = graph.nodes.find((n) => n.id === gt.consumer);
+    if (!consumer) {
+      warnings.push(`(skip) consumer ${gt.consumer} not in graph nodes`);
+      continue;
+    }
     const userInputParams = new Set(consumer.requiresUserInput.map((r) => r.param));
 
     console.log(`\n→ ${gt.consumer}`);

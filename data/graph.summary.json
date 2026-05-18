@@ -1,15 +1,20 @@
 {
-  "generatedAt": "2026-05-18T05:36:00.218Z",
+  "generatedAt": "2026-05-18T05:46:37.423Z",
   "nodes": 1309,
-  "edges": 5417,
+  "edges": 6325,
   "byToolkit": {
     "googlesuper": 442,
     "github": 867
   },
   "byEdgeType": {
-    "producer_consumer": 3905,
+    "producer_consumer": 4545,
     "mentioned": 43,
-    "lookup": 1469
+    "lookup": 1737
+  },
+  "bySubtype": {
+    "resolver": 5442,
+    "passthrough": 840,
+    "mentioned": 43
   },
   "topEntities": [
     {
@@ -73,5 +78,5 @@
       "producers": 26
     }
   ],
-  "orphanNodes": 338
+  "orphanNodes": 310
 }
