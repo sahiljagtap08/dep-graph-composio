@@ -172,7 +172,7 @@ function main() {
     const missing = rawTools.filter((t) => !extractions.has(t.slug));
     if (missing.length > 0) {
       console.warn(`${missing.length} tools missing extractions (skipped):`);
-      missing.slice(0, 5).forEach((t) => console.warn(`  - ${t.slug}`));
+      for (const t of missing.slice(0, 5)) console.warn(`  - ${t.slug}`);
     }
 
     // 1. Build node list
@@ -201,8 +201,12 @@ function main() {
     const producersByEntity = new Map<string, Set<string>>();
     for (const node of nodes) {
       for (const ent of node.produces) {
-        if (!producersByEntity.has(ent)) producersByEntity.set(ent, new Set());
-        producersByEntity.get(ent)!.add(node.id);
+        let set = producersByEntity.get(ent);
+        if (!set) {
+          set = new Set();
+          producersByEntity.set(ent, set);
+        }
+        set.add(node.id);
       }
     }
 
@@ -256,7 +260,8 @@ function main() {
           if (!producers) continue;
           for (const producerSlug of producers) {
             if (producerSlug === consumer) continue;
-            const producer = nodeBySlug.get(producerSlug)!;
+            const producer = nodeBySlug.get(producerSlug);
+            if (!producer) continue;
 
             // confidence heuristic
             let confidence = 0.6;
