@@ -1,13 +1,13 @@
 {
-  "generatedAt": "2026-05-18T05:34:54.079Z",
+  "generatedAt": "2026-05-18T05:36:00.218Z",
   "nodes": 1309,
-  "edges": 9597,
+  "edges": 5417,
   "byToolkit": {
     "googlesuper": 442,
     "github": 867
   },
   "byEdgeType": {
-    "producer_consumer": 8085,
+    "producer_consumer": 3905,
     "mentioned": 43,
     "lookup": 1469
   },
@@ -73,5 +73,5 @@
       "producers": 26
     }
   ],
-  "orphanNodes": 203
+  "orphanNodes": 338
 }

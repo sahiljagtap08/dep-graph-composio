@@ -106,6 +106,23 @@ const SKIP_ENTITIES = new Set([
   "property_id", // tracked separately if real, but Composio uses this generically
 ]);
 
+/**
+ * Ubiquitous entities — appear in nearly every tool's input AND output for a
+ * given toolkit (GitHub `owner`/`repo`/`user_login`, Google `user_id`). In
+ * practice the agent gets these from the user ("post a comment on facebook/react"),
+ * not by calling another tool first. We KEEP these as nodes' produced entities
+ * (for completeness) but treat them as user-provided when resolving edges, so
+ * the graph doesn't get drowned in repo→repo→repo links.
+ */
+const UBIQUITOUS_ENTITIES = new Set([
+  "owner",
+  "repo",
+  "org",
+  "user_login",
+  "username",
+  "user_id",
+]);
+
 // Max producers we'll link per (consumer, entity, param) tuple — keeps the
 // graph readable. Confidence ranking decides which producers survive.
 const MAX_PRODUCERS_PER_CONSUMER_ENTITY = 5;
@@ -212,7 +229,14 @@ function main() {
         description: tool.description,
         produces: [...produced],
         requiresUserInput: ex.consumes
-          .filter((c) => c.classification === "user_provided" && c.required)
+          .filter(
+            (c) =>
+              (c.classification === "user_provided" && c.required) ||
+              // ubiquitous "producer_ref" entities are de-facto user-provided
+              (c.classification === "producer_ref" &&
+                c.entity &&
+                UBIQUITOUS_ENTITIES.has(normalizeEntity(c.entity))),
+          )
           .map((c) => ({ param: c.param, rationale: c.rationale })),
         category: categorize(tool.slug),
       };
@@ -280,6 +304,9 @@ function main() {
         ) {
           const norm = normalizeEntity(c.entity);
           if (SKIP_ENTITIES.has(norm)) continue;
+          // Ubiquitous entities: don't draw producer_consumer edges. Instead
+          // surface as "needs from user" on the consumer node (handled below).
+          if (UBIQUITOUS_ENTITIES.has(norm) && c.classification === "producer_ref") continue;
           const producers = producersByEntity.get(norm);
           if (!producers) continue;
 
