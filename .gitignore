@@ -51,5 +51,6 @@ data/tools.json
 data/tools.googlesuper.json
 data/tools.github.json
 data/extracted/
+# graph.json is the final artifact — keep it tracked (~3MB)
 data/raw/
 *.local.json
