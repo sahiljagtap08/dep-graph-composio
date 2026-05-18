@@ -1,0 +1,77 @@
+{
+  "generatedAt": "2026-05-18T05:34:54.079Z",
+  "nodes": 1309,
+  "edges": 9597,
+  "byToolkit": {
+    "googlesuper": 442,
+    "github": 867
+  },
+  "byEdgeType": {
+    "producer_consumer": 8085,
+    "mentioned": 43,
+    "lookup": 1469
+  },
+  "topEntities": [
+    {
+      "entity": "owner",
+      "producers": 198
+    },
+    {
+      "entity": "repo",
+      "producers": 180
+    },
+    {
+      "entity": "user_login",
+      "producers": 110
+    },
+    {
+      "entity": "sha",
+      "producers": 61
+    },
+    {
+      "entity": "file_id",
+      "producers": 50
+    },
+    {
+      "entity": "property_id",
+      "producers": 50
+    },
+    {
+      "entity": "issue_number",
+      "producers": 45
+    },
+    {
+      "entity": "pull_number",
+      "producers": 44
+    },
+    {
+      "entity": "spreadsheet_id",
+      "producers": 43
+    },
+    {
+      "entity": "comment_id",
+      "producers": 40
+    },
+    {
+      "entity": "branch",
+      "producers": 39
+    },
+    {
+      "entity": "page_token",
+      "producers": 32
+    },
+    {
+      "entity": "org",
+      "producers": 30
+    },
+    {
+      "entity": "calendar_id",
+      "producers": 26
+    },
+    {
+      "entity": "event_id",
+      "producers": 26
+    }
+  ],
+  "orphanNodes": 203
+}

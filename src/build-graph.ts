@@ -87,6 +87,29 @@ const TOOLS_PATHS = [
 const EXTRACT_DIR = "data/extracted";
 const OUT_PATH = "data/graph.json";
 
+/**
+ * Generic / non-load-bearing entities that shouldn't drive dependency edges.
+ * Pagination tokens, sync tokens, etc. are passed turn-to-turn within a single
+ * conceptual operation — they're not "the output of tool A that tool B needs".
+ */
+const SKIP_ENTITIES = new Set([
+  "page_token",
+  "pagetoken",
+  "next_page_token",
+  "nexttoken",
+  "sync_token",
+  "synctoken",
+  "etag",
+  "cursor",
+  "after",
+  "before",
+  "property_id", // tracked separately if real, but Composio uses this generically
+]);
+
+// Max producers we'll link per (consumer, entity, param) tuple — keeps the
+// graph readable. Confidence ranking decides which producers survive.
+const MAX_PRODUCERS_PER_CONSUMER_ENTITY = 5;
+
 // Normalize entity names — strip toolkit prefixes, collapse synonyms.
 function normalizeEntity(raw: string): string {
   let e = raw.trim().toLowerCase().replace(/[-\s]+/g, "_");
@@ -256,28 +279,39 @@ function main() {
           c.entity
         ) {
           const norm = normalizeEntity(c.entity);
+          if (SKIP_ENTITIES.has(norm)) continue;
           const producers = producersByEntity.get(norm);
           if (!producers) continue;
+
+          // Score every candidate producer, then keep top-K.
+          const scored: { slug: string; confidence: number }[] = [];
           for (const producerSlug of producers) {
             if (producerSlug === consumer) continue;
             const producer = nodeBySlug.get(producerSlug);
             if (!producer) continue;
 
-            // confidence heuristic
-            let confidence = 0.6;
-            if (producer.toolkit === consumerToolkit) confidence = 0.8;
-            // strongly prefer list/get/create as producers for producer_ref
-            if (
-              c.classification === "producer_ref" &&
-              (producer.category === "list" || producer.category === "get" || producer.category === "create")
-            ) {
-              confidence = Math.min(1.0, confidence + 0.1);
+            let confidence = 0.55;
+            if (producer.toolkit === consumerToolkit) confidence += 0.2;
+            // for producer_ref, list/get/search are the natural producers
+            if (c.classification === "producer_ref") {
+              if (producer.category === "list") confidence += 0.15;
+              else if (producer.category === "get") confidence += 0.1;
+              else if (producer.category === "create") confidence += 0.08;
+              else if (producer.category === "update" || producer.category === "delete")
+                confidence -= 0.2;
             }
-            // for lookup_required, prefer list/search tools
-            if (c.classification === "lookup_required" && producer.category !== "list") {
-              confidence -= 0.2;
+            // for lookup_required, only list/search tools make sense
+            if (c.classification === "lookup_required") {
+              if (producer.category === "list") confidence += 0.2;
+              else confidence -= 0.3;
             }
+            scored.push({ slug: producerSlug, confidence: Math.max(0, Math.min(1, confidence)) });
+          }
 
+          scored.sort((a, b) => b.confidence - a.confidence);
+          const top = scored.slice(0, MAX_PRODUCERS_PER_CONSUMER_ENTITY);
+
+          for (const { slug: producerSlug, confidence } of top) {
             addEdge({
               source: producerSlug,
               target: consumer,
@@ -285,7 +319,7 @@ function main() {
               param: c.param,
               type: c.classification === "lookup_required" ? "lookup" : "producer_consumer",
               required: c.required,
-              confidence: Math.max(0, Math.min(1, confidence)),
+              confidence,
               rationale: c.rationale,
             });
           }
