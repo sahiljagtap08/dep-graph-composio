@@ -1,0 +1,15 @@
+{
+  "fetchedAt": "2026-05-18T05:07:58.505Z",
+  "total": 1309,
+  "perToolkit": {
+    "googlesuper": 442,
+    "github": 867
+  },
+  "sampleSlugs": [
+    "GOOGLESUPER_ACL_DELETE",
+    "GOOGLESUPER_ACL_GET",
+    "GOOGLESUPER_ACL_INSERT",
+    "GOOGLESUPER_ACL_LIST",
+    "GOOGLESUPER_ACL_PATCH"
+  ]
+}

@@ -46,6 +46,10 @@ agent-sessions/
 submission.zip
 project.zip
 
-# generated data
+# generated data — regenerable via scripts; keep summaries only
+data/tools.json
+data/tools.googlesuper.json
+data/tools.github.json
+data/extracted/
 data/raw/
 *.local.json
